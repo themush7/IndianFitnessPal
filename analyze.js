@@ -65,6 +65,44 @@ OUTPUT: Return ONLY valid JSON. No markdown. No backticks. No preamble. Raw JSON
 If input is not food or too vague to estimate, return:
 {"input_understood":false,"error_message":"Describe your meal like: 2 rotis with dal, or chicken biryani and raita"}`;
 
+// ─── DEMO MODE ───────────────────────────────────────────────
+// Returns realistic mock macros when no API key is set.
+// Automatically switches to real AI once ANTHROPIC_API_KEY is added.
+function getDemoResponse(meal) {
+  const m = meal.toLowerCase();
+
+  // keyword-based macro lookup
+  const patterns = [
+    { keys: ['biryani'], cal: 620, pro: 38, carb: 72, fat: 18, note: 'Demo mode. Based on standard chicken biryani plate.' },
+    { keys: ['roti', 'rotti', 'chapati', 'dal', 'sabzi'], cal: 450, pro: 17, carb: 70, fat: 15, note: 'Demo mode. 2 rotis + dal + sabzi standard portions.' },
+    { keys: ['oats', 'protein', 'whey'], cal: 275, pro: 29, carb: 30, fat: 5, note: 'Demo mode. Oats bowl with 1 scoop whey + black coffee.' },
+    { keys: ['egg', 'omelette', 'toast'], cal: 440, pro: 26, carb: 30, fat: 25, note: 'Demo mode. 3-egg omelette with 2 toast slices.' },
+    { keys: ['chicken'], cal: 520, pro: 48, carb: 32, fat: 18, note: 'Demo mode. Grilled chicken with rice.' },
+    { keys: ['paneer'], cal: 530, pro: 24, carb: 45, fat: 26, note: 'Demo mode. Paneer dish with rotis.' },
+    { keys: ['idli', 'dosa', 'sambar'], cal: 380, pro: 12, carb: 65, fat: 8, note: 'Demo mode. South Indian breakfast combo.' },
+    { keys: ['maggi'], cal: 385, pro: 14, carb: 43, fat: 18, note: 'Demo mode. 1 Maggi pack with egg.' },
+    { keys: ['vada', 'bhature', 'chole', 'puri'], cal: 680, pro: 16, carb: 95, fat: 24, note: 'Demo mode. Street food / heavy meal estimate.' },
+    { keys: ['pizza', 'burger', 'coke', 'pepsi'], cal: 720, pro: 22, carb: 98, fat: 26, note: 'Demo mode. Western fast food estimate.' },
+    { keys: ['banana', 'almond', 'snack'], cal: 280, pro: 8, carb: 38, fat: 9, note: 'Demo mode. Light snack estimate.' },
+    { keys: ['lassi', 'chai', 'coffee', 'milk'], cal: 180, pro: 6, carb: 28, fat: 5, note: 'Demo mode. Beverages estimate.' },
+  ];
+
+  let match = patterns.find(p => p.keys.some(k => m.includes(k)));
+  if (!match) match = { cal: 420, pro: 18, carb: 55, fat: 14, note: 'Demo mode. Generic Indian meal estimate.' };
+
+  return {
+    meal_summary: meal.trim(),
+    total: { calories: match.cal, protein_g: match.pro, carbs_g: match.carb, fats_g: match.fat },
+    breakdown: [
+      { item: 'Estimated from meal description', calories: match.cal, protein_g: match.pro, carbs_g: match.carb, fats_g: match.fat }
+    ],
+    confidence: 'medium',
+    assumption_note: match.note + ' Add ANTHROPIC_API_KEY to Vercel for real AI-powered analysis.',
+    input_understood: true,
+    demo_mode: true
+  };
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -77,11 +115,16 @@ export default async function handler(req, res) {
   if (!meal || !meal.trim()) {
     return res.status(400).json({ error: 'No meal provided' });
   }
-
   if (meal.trim().length > 500) {
     return res.status(400).json({ error: 'Meal description too long. Keep it under 500 characters.' });
   }
 
+  // ── NO API KEY: run demo mode ──
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return res.status(200).json(getDemoResponse(meal));
+  }
+
+  // ── API KEY PRESENT: real AI analysis ──
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -99,7 +142,6 @@ export default async function handler(req, res) {
     });
 
     const data = await response.json();
-
     if (data.error) {
       console.error('Anthropic API error:', data.error);
       return res.status(500).json({ error: 'AI service error. Please try again.' });
@@ -107,7 +149,6 @@ export default async function handler(req, res) {
 
     const raw = (data.content || []).map(c => c.text || '').join('');
     const clean = raw.replace(/```json|```/g, '').trim();
-
     const parsed = JSON.parse(clean);
     return res.status(200).json(parsed);
 
@@ -116,3 +157,4 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 }
+\
